@@ -9,10 +9,12 @@ import PrivacyPage from "@/react-app/pages/Privacy";
 import TermsPage from "@/react-app/pages/Terms";
 import AdminPage from "@/react-app/pages/Admin";
 import GoogleCalendarCallback from "@/react-app/pages/GoogleCalendarCallback";
+import ScrollToTop from "@/react-app/components/ScrollToTop";
 
 export default function App() {
   return (
     <Router>
+      <ScrollToTop />
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/services" element={<ServicesPage />} />
