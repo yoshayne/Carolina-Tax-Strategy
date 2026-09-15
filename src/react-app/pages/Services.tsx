@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router';
 import Header from '@/react-app/components/Header';
 import Footer from '@/react-app/components/Footer';
@@ -22,7 +22,18 @@ interface ServiceTier {
   popular?: boolean;
 }
 
-const tiers: ServiceTier[] = [
+interface ContentTier {
+  name: string;
+  label: string;
+  price: string;
+  priceNote?: string;
+  bestFor: string;
+  cta: string;
+  ctaLink: string;
+  popular?: boolean;
+}
+
+const DEFAULT_TIERS: ServiceTier[] = [
   {
     name: 'GOOD',
     label: 'Tax Prep Only',
@@ -85,6 +96,23 @@ const tiers: ServiceTier[] = [
   },
 ];
 
+function mergeContentIntoTiers(base: ServiceTier[], content: ContentTier[]): ServiceTier[] {
+  return base.map((tier) => {
+    const match = content.find((c) => c.name === tier.name);
+    if (!match) return tier;
+    return {
+      ...tier,
+      label: match.label,
+      price: match.price,
+      priceNote: match.priceNote,
+      bestFor: match.bestFor,
+      cta: match.cta,
+      ctaLink: match.ctaLink,
+      popular: match.popular,
+    };
+  });
+}
+
 const faqs = [
   {
     question: 'How do I know which tier is right for me?',
@@ -136,6 +164,17 @@ const guarantees = [
 ];
 
 export default function Services() {
+  const [tiers, setTiers] = useState<ServiceTier[]>(DEFAULT_TIERS);
+
+  useEffect(() => {
+    fetch('/api/content')
+      .then((r) => r.json())
+      .then((d: { tiers: ContentTier[] }) => {
+        if (d.tiers?.length) setTiers(mergeContentIntoTiers(DEFAULT_TIERS, d.tiers));
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="min-h-screen bg-white">
       <Header />
