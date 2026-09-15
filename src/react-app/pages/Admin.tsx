@@ -48,13 +48,14 @@ interface Lead {
   created_at: string;
 }
 
-type Tab = "dashboard" | "appointments" | "leads" | "settings" | "integrations";
+type Tab = "dashboard" | "appointments" | "leads" | "settings" | "content" | "integrations";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
   { id: "appointments", label: "Appointments" },
   { id: "leads", label: "Tax-Prep Leads" },
   { id: "settings", label: "Availability" },
+  { id: "content", label: "Pricing & Copy" },
   { id: "integrations", label: "Integrations" },
 ];
 
@@ -93,6 +94,7 @@ export default function Admin() {
         {tab === "appointments" && <AppointmentsTab />}
         {tab === "leads" && <LeadsTab />}
         {tab === "settings" && <SettingsTab />}
+        {tab === "content" && <ContentTab />}
         {tab === "integrations" && <IntegrationsTab />}
       </main>
     </div>
@@ -463,6 +465,215 @@ function SettingsTab() {
           <button onClick={save} className="bg-gold hover:bg-gold-dark text-white font-semibold px-6 py-2.5 rounded-lg">Save Settings</button>
           {saved && <span className="text-emerald-600 text-sm">Saved!</span>}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== CONTENT TAB ====================
+
+interface ServiceTierContent {
+  name: string;
+  label: string;
+  price: string;
+  priceNote: string;
+  bestFor: string;
+  features: string[];
+  cta: string;
+  ctaLink: string;
+  popular: boolean;
+}
+
+interface SiteContent {
+  tiers: ServiceTierContent[];
+}
+
+function ContentTab() {
+  const [content, setContent] = useState<SiteContent | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/admin/content").then((r) => r.json()).then(setContent).catch(() => {});
+  }, []);
+
+  async function save() {
+    if (!content) return;
+    setSaving(true);
+    await fetch("/api/admin/content", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(content),
+    });
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  }
+
+  function updateTier(index: number, field: keyof ServiceTierContent, value: string | boolean | string[]) {
+    setContent((c) => {
+      if (!c) return c;
+      const tiers = [...c.tiers];
+      tiers[index] = { ...tiers[index], [field]: value };
+      return { ...c, tiers };
+    });
+  }
+
+  function updateFeature(tierIndex: number, featIndex: number, value: string) {
+    setContent((c) => {
+      if (!c) return c;
+      const tiers = [...c.tiers];
+      const features = [...tiers[tierIndex].features];
+      features[featIndex] = value;
+      tiers[tierIndex] = { ...tiers[tierIndex], features };
+      return { ...c, tiers };
+    });
+  }
+
+  function addFeature(tierIndex: number) {
+    setContent((c) => {
+      if (!c) return c;
+      const tiers = [...c.tiers];
+      tiers[tierIndex] = { ...tiers[tierIndex], features: [...tiers[tierIndex].features, ""] };
+      return { ...c, tiers };
+    });
+  }
+
+  function removeFeature(tierIndex: number, featIndex: number) {
+    setContent((c) => {
+      if (!c) return c;
+      const tiers = [...c.tiers];
+      const features = tiers[tierIndex].features.filter((_, i) => i !== featIndex);
+      tiers[tierIndex] = { ...tiers[tierIndex], features };
+      return { ...c, tiers };
+    });
+  }
+
+  if (!content) return <p className="text-gray-500">Loading…</p>;
+
+  return (
+    <div className="max-w-3xl">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold text-navy-900">Pricing & Copy</h2>
+        <div className="flex items-center gap-3">
+          {saved && <span className="text-emerald-600 text-sm font-medium">Saved!</span>}
+          <button onClick={save} disabled={saving} className="bg-gold hover:bg-gold-dark text-white font-semibold px-6 py-2.5 rounded-lg disabled:opacity-50">
+            {saving ? "Saving…" : "Save Changes"}
+          </button>
+        </div>
+      </div>
+
+      <p className="text-sm text-gray-500 mb-6">Changes save to the database and appear on the website immediately — no redeploy needed.</p>
+
+      <div className="space-y-6">
+        {content.tiers.map((tier, ti) => (
+          <div key={ti} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-navy-900">{tier.name} — {tier.label}</h3>
+              <label className="flex items-center gap-2 text-sm text-navy-600">
+                <input
+                  type="checkbox"
+                  checked={tier.popular}
+                  onChange={(e) => updateTier(ti, "popular", e.target.checked)}
+                  className="rounded"
+                />
+                Featured / Popular
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Tier Label</label>
+                <input
+                  value={tier.label}
+                  onChange={(e) => updateTier(ti, "label", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Tier Name (badge)</label>
+                <input
+                  value={tier.name}
+                  onChange={(e) => updateTier(ti, "name", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Price</label>
+                <input
+                  value={tier.price}
+                  onChange={(e) => updateTier(ti, "price", e.target.value)}
+                  placeholder="e.g. Starting at $400"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Price Note (optional)</label>
+                <input
+                  value={tier.priceNote}
+                  onChange={(e) => updateTier(ti, "priceNote", e.target.value)}
+                  placeholder="e.g. per month"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Best For</label>
+                <input
+                  value={tier.bestFor}
+                  onChange={(e) => updateTier(ti, "bestFor", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Button Text</label>
+                <input
+                  value={tier.cta}
+                  onChange={(e) => updateTier(ti, "cta", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Button Link</label>
+                <input
+                  value={tier.ctaLink}
+                  onChange={(e) => updateTier(ti, "ctaLink", e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-2">Features (one per line)</label>
+              <div className="space-y-2">
+                {tier.features.map((feat, fi) => (
+                  <div key={fi} className="flex gap-2">
+                    <input
+                      value={feat}
+                      onChange={(e) => updateFeature(ti, fi, e.target.value)}
+                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                    <button
+                      onClick={() => removeFeature(ti, fi)}
+                      className="text-red-400 hover:text-red-600 px-2 text-lg leading-none"
+                      title="Remove"
+                    >×</button>
+                  </div>
+                ))}
+                <button
+                  onClick={() => addFeature(ti)}
+                  className="text-sm text-teal hover:text-teal-dark font-medium"
+                >+ Add feature</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 flex items-center gap-3">
+        {saved && <span className="text-emerald-600 text-sm font-medium">Saved!</span>}
+        <button onClick={save} disabled={saving} className="bg-gold hover:bg-gold-dark text-white font-semibold px-6 py-2.5 rounded-lg disabled:opacity-50">
+          {saving ? "Saving…" : "Save Changes"}
+        </button>
       </div>
     </div>
   );

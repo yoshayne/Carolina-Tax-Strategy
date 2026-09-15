@@ -465,6 +465,91 @@ app.put("/api/admin/settings", async (c) => {
   return c.json(merged);
 });
 
+// ==================== CONTENT ====================
+
+interface ServiceTierContent {
+  name: string;
+  label: string;
+  price: string;
+  priceNote?: string;
+  bestFor: string;
+  features: string[];
+  cta: string;
+  ctaLink: string;
+  popular?: boolean;
+}
+
+interface SiteContent {
+  tiers: ServiceTierContent[];
+}
+
+const DEFAULT_CONTENT: SiteContent = {
+  tiers: [
+    {
+      name: "GOOD",
+      label: "Tax Prep Only",
+      price: "Starting at $400",
+      priceNote: "",
+      bestFor: "Stable income, minimal complexity",
+      features: ["Federal + state filing", "Basic compliance review", "Standard deduction analysis", "E-file with confirmation"],
+      cta: "Book Basic Prep",
+      ctaLink: "/book",
+      popular: false,
+    },
+    {
+      name: "BETTER",
+      label: "Strategy + Filing",
+      price: "Starting at $1,900",
+      priceNote: "Plan delivered in 7–14 days",
+      bestFor: "Business owners & high earners who want legal savings",
+      features: ["Annual strategy plan", "Quarterly projections", "Entity structure review", "Tax filing included", "Audit-ready documentation"],
+      cta: "Start Your Strategy",
+      ctaLink: "/book",
+      popular: true,
+    },
+    {
+      name: "BEST",
+      label: "Year-Round Advisory",
+      price: "Starting at $500",
+      priceNote: "per month",
+      bestFor: "Growing revenue, complex multi-income streams",
+      features: ["Monthly advisory calls", "Quarterly tax management", "Year-end execution oversight", "Proactive planning updates", "Priority support access", "All Strategy + Filing benefits"],
+      cta: "Apply for Advisory",
+      ctaLink: "/book",
+      popular: false,
+    },
+  ],
+};
+
+async function getContent(): Promise<SiteContent> {
+  const { rows } = await query<{ value: string }>("SELECT value FROM settings WHERE key = $1", ["site_content"]);
+  if (rows.length && rows[0].value) {
+    try { return JSON.parse(rows[0].value) as SiteContent; } catch { /* fall through */ }
+  }
+  return DEFAULT_CONTENT;
+}
+
+async function saveContent(content: SiteContent): Promise<void> {
+  await query(
+    "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+    ["site_content", JSON.stringify(content)]
+  );
+}
+
+app.get("/api/content", async (c) => {
+  return c.json(await getContent());
+});
+
+app.get("/api/admin/content", async (c) => {
+  return c.json(await getContent());
+});
+
+app.put("/api/admin/content", async (c) => {
+  const body = (await c.req.json()) as SiteContent;
+  await saveContent(body);
+  return c.json({ success: true });
+});
+
 app.get("/api/admin/integrations", (c) => {
   return c.json({
     brevo: brevoConfigured(),
