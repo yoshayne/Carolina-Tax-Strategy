@@ -642,14 +642,24 @@ function ContentTab() {
   async function save() {
     if (!content) return;
     setSaving(true);
-    await fetch("/api/admin/content", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(content),
-    });
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+    try {
+      const r = await fetch("/api/admin/content", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(content),
+      });
+      const d = await r.json();
+      if (!d.success) {
+        alert(`Save failed: ${d.error || "unknown error"}`);
+        return;
+      }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      alert(`Save failed: ${err instanceof Error ? err.message : "network error"}`);
+    } finally {
+      setSaving(false);
+    }
   }
 
   function updateTier(index: number, field: keyof ServiceTierContent, value: string | boolean | string[]) {

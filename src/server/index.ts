@@ -667,9 +667,14 @@ app.get("/api/admin/content", async (c) => {
 });
 
 app.put("/api/admin/content", async (c) => {
-  const body = (await c.req.json()) as SiteContent;
-  await saveContent(body);
-  return c.json({ success: true });
+  try {
+    const body = (await c.req.json()) as SiteContent;
+    await saveContent(body);
+    return c.json({ success: true });
+  } catch (err) {
+    console.error("Failed to save content:", err);
+    return c.json({ success: false, error: String(err) }, 500);
+  }
 });
 
 app.get("/api/admin/integrations", (c) => {
