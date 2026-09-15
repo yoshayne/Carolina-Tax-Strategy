@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 
 interface CalendarStatus {
   connected: boolean;
@@ -59,8 +59,89 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "integrations", label: "Integrations" },
 ];
 
+function LoginScreen({ onLogin }: { onLogin: () => void }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const r = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const d = await r.json();
+      if (d.success) { onLogin(); }
+      else { setError(d.error || "Incorrect password"); }
+    } catch {
+      setError("Network error — please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+      <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 w-full max-w-sm">
+        <div className="text-center mb-8">
+          <img src="/logo.png" alt="Carolina Tax Strategy" className="h-12 mx-auto mb-4 object-contain" />
+          <h1 className="text-xl font-serif text-navy-900">Admin Access</h1>
+          <p className="text-sm text-gray-500 mt-1">Enter your passcode to continue</p>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input
+            ref={inputRef}
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Passcode"
+            className="w-full border border-gray-300 rounded-lg px-4 py-3 text-center text-2xl tracking-widest focus:outline-none focus:ring-2 focus:ring-teal"
+            autoComplete="current-password"
+          />
+          {error && <p className="text-red-600 text-sm text-center">{error}</p>}
+          <button
+            type="submit"
+            disabled={loading || !password}
+            className="w-full bg-navy-900 hover:bg-navy-800 text-white font-semibold py-3 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {loading ? "Checking…" : "Enter"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function Admin() {
   const [tab, setTab] = useState<Tab>("dashboard");
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch("/api/admin/auth-status")
+      .then((r) => r.json())
+      .then((d) => setAuthenticated(d.authenticated))
+      .catch(() => setAuthenticated(false));
+  }, []);
+
+  async function handleLogout() {
+    await fetch("/api/admin/logout", { method: "POST" });
+    setAuthenticated(false);
+  }
+
+  if (authenticated === null) {
+    return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="w-8 h-8 border-2 border-teal border-t-transparent rounded-full animate-spin" /></div>;
+  }
+
+  if (!authenticated) {
+    return <LoginScreen onLogin={() => setAuthenticated(true)} />;
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -83,8 +164,9 @@ export default function Admin() {
             </button>
           ))}
         </nav>
-        <div className="mt-auto px-2 pt-6">
-          <a href="/" className="text-sm text-white/50 hover:text-white">← Back to website</a>
+        <div className="mt-auto px-2 pt-6 space-y-2">
+          <a href="/" className="block text-sm text-white/50 hover:text-white">← Back to website</a>
+          <button onClick={handleLogout} className="block text-sm text-white/50 hover:text-white">Sign out</button>
         </div>
       </aside>
 
@@ -470,6 +552,66 @@ function SettingsTab() {
   );
 }
 
+// ==================== CHANGE PASSWORD ====================
+
+function ChangePasswordCard() {
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setMessage(null);
+    if (newPassword !== confirmPassword) { setMessage({ text: "New passwords don't match", ok: false }); return; }
+    if (newPassword.length < 6) { setMessage({ text: "New password must be at least 6 characters", ok: false }); return; }
+    setLoading(true);
+    try {
+      const r = await fetch("/api/admin/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ oldPassword, newPassword }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        setMessage({ text: "Password changed successfully!", ok: true });
+        setOldPassword(""); setNewPassword(""); setConfirmPassword("");
+      } else {
+        setMessage({ text: d.error || "Failed to change password", ok: false });
+      }
+    } catch {
+      setMessage({ text: "Network error — please try again", ok: false });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+      <h3 className="text-lg font-semibold text-navy-900 mb-4">Change Passcode</h3>
+      <form onSubmit={handleSubmit} className="space-y-3 max-w-sm">
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Current passcode</label>
+          <input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" autoComplete="current-password" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">New passcode</label>
+          <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" autoComplete="new-password" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Confirm new passcode</label>
+          <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" autoComplete="new-password" />
+        </div>
+        {message && <p className={`text-sm ${message.ok ? "text-emerald-600" : "text-red-600"}`}>{message.text}</p>}
+        <button type="submit" disabled={loading || !oldPassword || !newPassword || !confirmPassword} className="bg-navy-900 hover:bg-navy-800 text-white font-semibold px-5 py-2 rounded-lg text-sm disabled:opacity-50">
+          {loading ? "Saving…" : "Change Passcode"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 // ==================== CONTENT TAB ====================
 
 interface ServiceTierContent {
@@ -792,6 +934,9 @@ function IntegrationsTab() {
           </div>
         )}
       </div>
+
+      {/* Change Password */}
+      <ChangePasswordCard />
 
       {/* Brevo Email */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">

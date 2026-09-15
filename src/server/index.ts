@@ -5,6 +5,7 @@ import { z } from "zod";
 import Redis from "ioredis";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
 
 import { query, initSchema } from "./db";
 import { getValidAccessToken, createCalendarEventOAuth } from "./google";
@@ -205,8 +206,128 @@ app.get("/api/calendar/test", async (c) => {
   }
 });
 
+// ==================== ADMIN AUTH ====================
+
+const DEFAULT_ADMIN_PASSWORD = "123456";
+const SESSION_TTL = 60 * 60 * 24; // 24 hours
+const SESSION_COOKIE = "cts_admin_session";
+
+// In-memory session store (fallback when Redis unavailable)
+const localSessions = new Set<string>();
+
+function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const hash = scryptSync(password, salt, 32).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password: string, stored: string): boolean {
+  try {
+    const [salt, hash] = stored.split(":");
+    const candidate = scryptSync(password, salt, 32);
+    return timingSafeEqual(Buffer.from(hash, "hex"), candidate);
+  } catch {
+    return false;
+  }
+}
+
+async function getAdminPasswordHash(): Promise<string> {
+  const { rows } = await query<{ value: string }>("SELECT value FROM settings WHERE key = $1", ["admin_password"]);
+  if (rows.length && rows[0].value) return rows[0].value;
+  // First boot: store hashed default
+  const hashed = hashPassword(DEFAULT_ADMIN_PASSWORD);
+  await query("INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING", ["admin_password", hashed]);
+  return hashed;
+}
+
+async function createSession(): Promise<string> {
+  const token = randomBytes(32).toString("hex");
+  if (redis) {
+    await redis.set(`session:${token}`, "1", "EX", SESSION_TTL);
+  } else {
+    localSessions.add(token);
+    setTimeout(() => localSessions.delete(token), SESSION_TTL * 1000);
+  }
+  return token;
+}
+
+async function validateSession(token: string): Promise<boolean> {
+  if (!token) return false;
+  if (redis) {
+    const val = await redis.get(`session:${token}`);
+    return val === "1";
+  }
+  return localSessions.has(token);
+}
+
+async function destroySession(token: string): Promise<void> {
+  if (redis) await redis.del(`session:${token}`);
+  else localSessions.delete(token);
+}
+
+function getSessionToken(c: { req: { header: (name: string) => string | undefined } }): string {
+  const cookieHeader = c.req.header("cookie") || "";
+  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
+  return match ? match[1] : "";
+}
+
+function setSessionCookie(token: string): string {
+  return `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${SESSION_TTL}; SameSite=Lax`;
+}
+
+function clearSessionCookie(): string {
+  return `${SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`;
+}
+
+// Public auth endpoints (no session required)
+app.post("/api/admin/login", async (c) => {
+  const { password } = (await c.req.json()) as { password?: string };
+  if (!password) return c.json({ success: false, error: "Password required" }, 400);
+  const stored = await getAdminPasswordHash();
+  if (!verifyPassword(password, stored)) return c.json({ success: false, error: "Incorrect password" }, 401);
+  const token = await createSession();
+  c.header("Set-Cookie", setSessionCookie(token));
+  return c.json({ success: true });
+});
+
+app.post("/api/admin/logout", async (c) => {
+  const token = getSessionToken(c);
+  if (token) await destroySession(token);
+  c.header("Set-Cookie", clearSessionCookie());
+  return c.json({ success: true });
+});
+
+app.get("/api/admin/auth-status", async (c) => {
+  const token = getSessionToken(c);
+  const authenticated = await validateSession(token);
+  return c.json({ authenticated });
+});
+
+// Admin auth middleware — protects all /api/admin/* except the three above
+async function adminAuth(c: Parameters<Parameters<typeof app.use>[1]>[0], next: () => Promise<void>) {
+  const path = new URL(c.req.url).pathname;
+  const open = ["/api/admin/login", "/api/admin/logout", "/api/admin/auth-status", "/api/admin/auth/google/callback"];
+  if (open.some((p) => path === p || path.startsWith(p))) return next();
+  const token = getSessionToken(c);
+  if (!(await validateSession(token))) return c.json({ error: "Unauthorized" }, 401);
+  return next();
+}
+
+app.use("/api/admin/*", adminAuth);
+
+// Change password (requires valid session, enforced by middleware above)
+app.post("/api/admin/change-password", async (c) => {
+  const { oldPassword, newPassword } = (await c.req.json()) as { oldPassword?: string; newPassword?: string };
+  if (!oldPassword || !newPassword) return c.json({ success: false, error: "Both passwords required" }, 400);
+  if (newPassword.length < 6) return c.json({ success: false, error: "New password must be at least 6 characters" }, 400);
+  const stored = await getAdminPasswordHash();
+  if (!verifyPassword(oldPassword, stored)) return c.json({ success: false, error: "Current password is incorrect" }, 401);
+  const hashed = hashPassword(newPassword);
+  await query("INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", ["admin_password", hashed]);
+  return c.json({ success: true });
+});
+
 // ==================== GOOGLE CALENDAR OAUTH ====================
-// TODO: add admin auth before production — all /api/admin/* routes are currently open.
 
 const GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/userinfo.email";
 
